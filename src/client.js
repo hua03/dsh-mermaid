@@ -82,6 +82,148 @@ function loadMermaidRuntime() {
   return runtimePromise;
 }
 
+// Rendering inside the article document is expensive: Mermaid mutates a
+// measurement subtree and every layout flush recalculates styles for the whole
+// preview (a 27-node flowchart costs ~2s inside a 1400-element document vs
+// ~250ms in an empty page). Render in a hidden same-origin iframe and import the
+// resulting markup instead, so diagram cost no longer scales with app DOM size.
+const ISOLATED_READY_TIMEOUT_MS = 3_000;
+const ISOLATED_RENDER_TIMEOUT_MS = 15_000;
+let isolatedFrame = null;
+let isolatedState = 'idle';
+let isolatedWaiter = null;
+let isolatedReadyTimer = null;
+let isolatedUnavailable = false;
+const isolatedPending = new Map();
+
+function debugIsolate(state, error) {
+  if (typeof window === 'undefined') return;
+  const info = window.__dshMmdCIsolate || (window.__dshMmdCIsolate = {});
+  info.state = state;
+  if (error) info.error = String(error?.message || error);
+  else info.error = null;
+  info.at = performance.now();
+}
+
+function canIsolateRendering() {
+  return typeof window !== 'undefined'
+    && typeof document !== 'undefined'
+    && !!document.body
+    && typeof HTMLIFrameElement !== 'undefined'
+    && 'contentDocument' in HTMLIFrameElement.prototype
+    && !/HappyDOM/i.test(navigator.userAgent || '');
+}
+
+function isolatedFailure(error, settleWaiter) {
+  debugIsolate('failed', error);
+  isolatedState = 'failed';
+  isolatedUnavailable = true;
+  const waiter = isolatedWaiter;
+  isolatedWaiter = null;
+  settleWaiter?.();
+  waiter?.reject(error);
+  for (const pending of isolatedPending.values()) pending.reject(error);
+  isolatedPending.clear();
+  isolatedFrame?.remove();
+  isolatedFrame = null;
+}
+
+function handleIsolatedMessage(event) {
+  if (!isolatedFrame || event.source !== isolatedFrame.contentWindow) return;
+  const data = event.data;
+  if (!data || data.__dshMmdC !== 'isolated') return;
+  if (data.kind === 'ready') {
+    if (isolatedReadyTimer) { clearTimeout(isolatedReadyTimer); isolatedReadyTimer = null; }
+    debugIsolate('ready', null);
+    isolatedState = 'ready';
+    const waiter = isolatedWaiter;
+    isolatedWaiter = null;
+    waiter?.resolve();
+    return;
+  }
+  const pending = isolatedPending.get(data.id);
+  if (!pending) return;
+  isolatedPending.delete(data.id);
+  if (data.ok) pending.resolve(data.svg);
+  else pending.reject(new Error(data.error || 'isolated render failed'));
+}
+
+function ensureIsolatedRenderer() {
+  if (isolatedUnavailable) return Promise.reject(new Error('isolated renderer unavailable'));
+  if (isolatedState === 'ready') return Promise.resolve();
+  if (isolatedState === 'loading') {
+    return new Promise((resolve, reject) => { isolatedWaiter = { resolve, reject }; });
+  }
+  if (!canIsolateRendering()) {
+    isolatedUnavailable = true;
+    return Promise.reject(new Error('isolated renderer not supported'));
+  }
+  isolatedState = 'loading';
+  return new Promise((resolve, reject) => {
+    isolatedWaiter = { resolve, reject };
+    isolatedReadyTimer = setTimeout(() => {
+      isolatedReadyTimer = null;
+      isolatedFailure(new Error('isolated renderer ready timeout'), () => {});
+    }, ISOLATED_READY_TIMEOUT_MS);
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.tabIndex = -1;
+    frame.style.cssText = 'position:fixed;left:-20000px;top:0;width:1000px;height:800px;border:0;visibility:hidden;pointer-events:none';
+    isolatedFrame = frame;
+    frame.addEventListener('load', () => {
+      const frameDocument = frame.contentDocument;
+      if (!frameDocument?.head) {
+        isolatedFailure(new Error('isolated renderer document unavailable'), () => { if (isolatedReadyTimer) clearTimeout(isolatedReadyTimer); isolatedReadyTimer = null; });
+        return;
+      }
+      const script = frameDocument.createElement('script');
+      script.type = 'module';
+      script.textContent = `
+import * as runtime from ${JSON.stringify(new URL(RUNTIME_URL, window.location.href).href)};
+window.addEventListener('message', async (event) => {
+  const data = event.data;
+  if (!data || data.__dshMmdC !== 'isolated' || data.kind !== 'render') return;
+  try {
+    runtime.default.initialize(data.config);
+    const result = await runtime.renderMermaid(data.id, data.source);
+    parent.postMessage({ __dshMmdC: 'isolated', kind: 'result', id: data.id, ok: true, svg: result.svg }, '*');
+  } catch (error) {
+    parent.postMessage({ __dshMmdC: 'isolated', kind: 'result', id: data.id, ok: false, error: String(error?.message || error) }, '*');
+  }
+});
+parent.postMessage({ __dshMmdC: 'isolated', kind: 'ready' }, '*');
+`;
+      frameDocument.head.appendChild(script);
+    }, { once: true });
+    frame.addEventListener('error', () => isolatedFailure(new Error('isolated renderer failed to load'), () => { if (isolatedReadyTimer) clearTimeout(isolatedReadyTimer); isolatedReadyTimer = null; }), { once: true });
+    document.body.appendChild(frame);
+  });
+}
+
+async function renderIsolated(id, source) {
+  await ensureIsolatedRenderer();
+  return await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      isolatedPending.delete(id);
+      reject(new Error('isolated render timeout'));
+    }, ISOLATED_RENDER_TIMEOUT_MS);
+    isolatedPending.set(id, {
+      resolve: (svg) => { clearTimeout(timeout); resolve(svg); },
+      reject: (error) => { clearTimeout(timeout); reject(error); },
+    });
+    isolatedFrame.contentWindow.postMessage(
+      { __dshMmdC: 'isolated', kind: 'render', id, source, config: themeConfig(document) },
+      '*',
+    );
+  });
+}
+
+function destroyIsolatedRenderer() {
+  if (isolatedState === 'ready' || isolatedState === 'loading') {
+    isolatedFailure(new Error('isolated renderer disposed'));
+  }
+}
+
 let activeThemeFingerprint = null;
 
 function t(key, parameters) {
@@ -314,9 +456,11 @@ function createEntry(code) {
   };
   entries.set(code, entry);
   localizeEntry(entry);
-  // Warm the 3.5MB Mermaid runtime while the card is still stabilizing, so the
-  // first render does not pay import time on top of layout time.
-  if (!mermaidRuntime && !runtimePromise) void loadMermaidRuntime().catch(() => {});
+  // Warm the renderer while the card is still stabilizing, so the first render
+  // does not pay boot time on top of layout time. Prefer the isolated frame:
+  // importing the 3.5MB runtime here would parse it on the app's main thread.
+  if (canIsolateRendering()) void ensureIsolatedRenderer().catch(() => {});
+  else if (!mermaidRuntime && !runtimePromise) void loadMermaidRuntime().catch(() => {});
 
   btnDiagram.addEventListener('click', () => setViewFromControl(entry, 'diagram'));
   btnCode.addEventListener('click', () => setViewFromControl(entry, 'code'));
@@ -405,12 +549,18 @@ async function renderDiagram(entry) {
   }
 
   try {
-    const runtime = await loadMermaidRuntime();
-    if (generation !== entry.renderGeneration || !entry.wrapper.isConnected) return;
-    if ((entry.code.textContent || '').trim() !== source) return;
-    initializeMermaid(runtime);
     const id = `dsh-mmd-c-${++uid}`;
-    const { svg, bindFunctions } = await runtime.render(id, source);
+    let svg = await renderIsolated(id, source).catch(() => null);
+    let bindFunctions = null;
+    if (svg && (generation !== entry.renderGeneration || !entry.wrapper.isConnected)) return;
+    if (svg && (entry.code.textContent || '').trim() !== source) return;
+    if (!svg) {
+      const runtime = await loadMermaidRuntime();
+      if (generation !== entry.renderGeneration || !entry.wrapper.isConnected) return;
+      if ((entry.code.textContent || '').trim() !== source) return;
+      initializeMermaid(runtime);
+      ({ svg, bindFunctions } = await runtime.render(id, source));
+    }
     if (generation !== entry.renderGeneration || !entry.wrapper.isConnected) return;
     if ((entry.code.textContent || '').trim() !== source) return;
     entry.pane.innerHTML = svg;
@@ -598,6 +748,7 @@ function apply(ctx) {
     };
     document.addEventListener('keydown', handleDocumentKeydown);
     window.addEventListener('resize', handleWindowResize);
+    window.addEventListener('message', handleIsolatedMessage);
 
     document.querySelectorAll('pre code').forEach(maybeEnhance);
 
@@ -607,6 +758,8 @@ function apply(ctx) {
       localeObserver.disconnect();
       document.removeEventListener('keydown', handleDocumentKeydown);
       window.removeEventListener('resize', handleWindowResize);
+      window.removeEventListener('message', handleIsolatedMessage);
+      destroyIsolatedRenderer();
       for (const wrapper of [...wrappers]) {
         const entry = entries.get(wrapper._dshCode);
         if (entry) disposeEntry(entry);

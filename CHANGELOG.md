@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.3 — 2026-11-13
+
+修复打开长文档、滚动到图表时约 2 秒的主线程卡顿。
+
+- 根因：mermaid 渲染会反复插入/测量临时节点，每次布局刷新都会为大正文（预览约 1400 元素）重算样式；trace 里 `UpdateLayoutTree` 累计 1.9s，单次 long task 1.6–2.2s。
+- 渲染改到隐藏的同源 iframe 内完成（`ensureIsolatedRenderer` / `renderIsolated`）：iframe 只加载一次 3.5MB runtime，之后通过 `postMessage` 传入源码与主题配置，取回 SVG 标记插入正文。正文 DOM 不再参与 mermaid 的样式重算。
+- 首块检测到即预建 iframe（预取 runtime），避免滚动到位时再付启动成本；iframe `ready`/`render` 分别有 3s/15s 超时，失败自动回退到原来的页内渲染，并记住不可用状态不再重试。
+- 实测（1600×1000 headless，5669px 预览、27 节点中文 flowchart）：滚动到图表的 long task 由 2152ms 降到 219ms；同一张图在 iframe 内渲染约 232ms。
+- 单元测试仍为 51 项全通过；`lib/client.js` 35.9KB。
+
 ## 0.1.2
 
 - 图表配色改为用 `--dsw-alias-state-business-primary` 与页面背景混合出底色（亮色 11%、暗色 26%），修复白色主题下节点几乎不可见的问题；连线改用 `label-secondary`。

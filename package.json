@@ -1,0 +1,57 @@
+{
+  "name": "@huahao/dsh-mermaid",
+  "version": "0.1.0",
+  "description": "Mermaid diagrams in DeepSeek Harness (chat + file preview), tuned for DSH 0.2.2: native-token theming, lazy runtime, fullscreen/SVG export, no telemetry.",
+  "author": {
+    "name": "huahao"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node --check scripts/build.mjs && node --check src/client.js && node --check src/detection.js && node --check src/i18n.js && node --check src/index.js && node --check src/mermaid-runtime.js && node --check src/scroll.js && node --check src/styles.js && node --check src/svg.js && node --check src/theme.js && node --check src/tooltip.js && node --check src/viewer.js && node --test",
+    "prepare": "npm run build",
+    "prepack": "npm run check"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    },
+    "engines": {
+      "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "mermaid",
+    "diagram"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "happy-dom": "^21.0.0",
+    "mermaid": "11.17.2"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

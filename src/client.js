@@ -26,6 +26,23 @@ let renderQueueActive = false;
 let tooltipPositioner = null;
 let tooltipPositionerFactory = null;
 let preserveViewPosition = null;
+// Re-rendering the same fence (theme toggles, preview re-mounts, window zooms)
+// is the main source of jank: mermaid layout takes ~250ms even for small
+// graphs. Cache the rendered markup as a template with a placeholder id so it
+// can be re-inserted instantly and still get per-instance ids.
+const SVG_CACHE_LIMIT = 24;
+const svgCache = new Map();
+const SVG_ID_PLACEHOLDER = '__DSH_MMD_C_SVG_ID__';
+
+function rememberSvg(source, id, svg) {
+  const template = svg.split(id).join(SVG_ID_PLACEHOLDER);
+  if (svgCache.size >= SVG_CACHE_LIMIT) svgCache.delete(svgCache.keys().next().value);
+  svgCache.set(cacheKey(source), { template });
+}
+
+function cacheKey(source) {
+  return `${themeFingerprint()}\u0000${source}`;
+}
 const entries = new WeakMap();
 const wrappers = new Set();
 const renderQueue = [];
@@ -297,6 +314,9 @@ function createEntry(code) {
   };
   entries.set(code, entry);
   localizeEntry(entry);
+  // Warm the 3.5MB Mermaid runtime while the card is still stabilizing, so the
+  // first render does not pay import time on top of layout time.
+  if (!mermaidRuntime && !runtimePromise) void loadMermaidRuntime().catch(() => {});
 
   btnDiagram.addEventListener('click', () => setViewFromControl(entry, 'diagram'));
   btnCode.addEventListener('click', () => setViewFromControl(entry, 'code'));
@@ -365,6 +385,25 @@ async function renderDiagram(entry) {
     return;
   }
 
+  const key = cacheKey(source);
+  const cached = svgCache.get(key);
+  if (cached) {
+    entry.pane.innerHTML = cached.template.split(SVG_ID_PLACEHOLDER).join(`dsh-mmd-c-${++uid}`);
+    const cachedSvg = entry.pane.querySelector('svg');
+    if (cachedSvg) {
+      ensureSvgAccessibility(cachedSvg, t('diagramTitle', { type: entry.badge.textContent || 'mermaid' }));
+      entry.lastRendered = source;
+      entry.messageKey = null;
+      entry.messageParameters = null;
+      entry.wrapper.dataset.state = 'ok';
+      setViewControlsAvailable(entry, true);
+      entry.pane.dataset.state = 'ok';
+      setEntryStatus(entry, 'rendered');
+      if (fullscreenViewer.isOpenFor(entry)) fullscreenViewer.update(entry, false);
+      return;
+    }
+  }
+
   try {
     const runtime = await loadMermaidRuntime();
     if (generation !== entry.renderGeneration || !entry.wrapper.isConnected) return;
@@ -399,6 +438,10 @@ async function renderDiagram(entry) {
     setViewControlsAvailable(entry, true);
     entry.pane.dataset.state = 'ok';
     setEntryStatus(entry, 'rendered');
+    // Store the id-free template; the id prefix only exists to keep mermaid's
+    // internal selectors unique per render.
+    const generatedId = `dsh-mmd-c-${uid}`;
+    if (svg.includes(generatedId)) rememberSvg(source, generatedId, svg);
     if (fullscreenViewer.isOpenFor(entry)) fullscreenViewer.update(entry, false);
   } catch (error) {
     if (generation !== entry.renderGeneration || !entry.wrapper.isConnected) return;
@@ -416,10 +459,13 @@ function scheduleRender(entry) {
     disposeEntry(entry);
     return;
   }
+  // First paint should not wait for the debounce meant for streaming updates;
+  // only re-renders of already-rendered fences need to settle.
+  const delay = entry.lastRendered ? RENDER_DEBOUNCE_MS : 0;
   entry.renderTimer = setTimeout(() => {
     entry.renderTimer = null;
     enqueueRender(entry);
-  }, RENDER_DEBOUNCE_MS);
+  }, delay);
 }
 
 function yieldToBrowser() {

@@ -12,19 +12,25 @@ async function withDom(callback) {
   document.head.innerHTML = `<style>
     :root, body {
       --dsw-alias-markdown-code-block: #f1f1f3;
+      --dsw-alias-bg-layer-1: #ffffff;
       --dsw-alias-bg-layer-2: #ffffff;
       --dsw-alias-label-primary: #1a1a1a;
+      --dsw-alias-label-secondary: #4b5563;
       --dsw-alias-label-tertiary: #777777;
       --dsw-alias-state-business-primary: #4f46e5;
       --dsw-alias-border-l1: #e0e0e4;
+      --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
     }
     body[data-ds-dark-theme] {
       --dsw-alias-markdown-code-block: #1b1b1f;
+      --dsw-alias-bg-layer-1: #121214;
       --dsw-alias-bg-layer-2: #232329;
       --dsw-alias-label-primary: #f2f2f3;
+      --dsw-alias-label-secondary: #a1a7ae;
       --dsw-alias-label-tertiary: #9a9aa2;
       --dsw-alias-state-business-primary: #8b8bff;
       --dsw-alias-border-l1: #34343c;
+      --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
     }
   </style>`;
   document.body.textContent = '';
@@ -45,7 +51,7 @@ test('maps DSH design tokens to a base Mermaid theme in light and dark mode', ()
     assert.equal(light.theme, 'base');
     assert.equal(light.themeVariables.darkMode, false);
     assert.equal(light.themeVariables.primaryTextColor, '#1a1a1a');
-    assert.equal(light.themeVariables.lineColor, '#777777');
+    assert.equal(light.themeVariables.lineColor, '#4b5563');
     assert.equal(light.maxTextSize, 50_000);
     assert.equal(light.maxEdges, 2_000);
     assert.equal(light.securityLevel, 'strict');
@@ -57,7 +63,12 @@ test('maps DSH design tokens to a base Mermaid theme in light and dark mode', ()
     const dark = themeConfig(document);
     assert.equal(dark.themeVariables.darkMode, true);
     assert.equal(dark.themeVariables.primaryTextColor, '#f2f2f3');
-    assert.equal(dark.themeVariables.primaryColor, '#232329');
+    // Node fill is an accent tint over the page background, not the near-white
+    // code-block surface, and must differ from the surrounding canvas.
+    assert.equal(dark.themeVariables.background, 'transparent');
+    assert.match(dark.themeVariables.primaryColor, /^#[0-9a-f]{6}$/);
+    assert.notEqual(dark.themeVariables.primaryColor, '#121214');
+    assert.notEqual(dark.themeVariables.primaryColor, dark.themeVariables.primaryBorderColor);
   }));
 
 test('theme fingerprint changes when boolean appearance attributes flip', () =>

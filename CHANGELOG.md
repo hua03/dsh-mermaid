@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- 图表配色改为用 `--dsw-alias-state-business-primary` 与页面背景混合出底色（亮色 11%、暗色 26%），修复白色主题下节点几乎不可见的问题；连线改用 `label-secondary`。
+- 首次渲染不再等待 500 ms 去抖（流式更新仍保留），并在检测到 mermaid 块时预取 3.5 MB runtime。
+- 新增按（主题 + 源码）键的 SVG 模板缓存（24 条），预览面板重挂载、主题切换、页面缩放时命中缓存直接插入，避免重复 ~250 ms 的 mermaid 布局。
+- 全屏查看器缩放上限由 5× 降到 4×，viewport/stage 增加 CSS containment，降低大图缩放时的光栅化开销。
+
 ## 0.1.1 — 2026-11-13
 
 修复中文界面下 mermaid 代码块不渲染的问题。

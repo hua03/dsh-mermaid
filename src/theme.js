@@ -2,21 +2,25 @@
 // in light, dark and acrylic (wallpaper/fluent) themes.
 
 const LIGHT_FALLBACKS = {
+  canvas: '#ffffff',
   bg: '#f7f7f7',
   surface: '#fafafa',
   text: '#222222',
-  line: '#666666',
-  accent: '#0067c0',
-  border: '#bbbbbb',
+  line: '#4b5563',
+  muted: '#9ca3af',
+  accent: '#4d6bfe',
+  border: 'rgba(0, 0, 0, 0.1)',
 };
 
 const DARK_FALLBACKS = {
+  canvas: '#1b1b1c',
   bg: '#1e1e1e',
   surface: '#2b2b2b',
   text: '#eeeeee',
-  line: '#aaaaaa',
-  accent: '#79b8ff',
-  border: '#505050',
+  line: '#a1a7ae',
+  muted: '#767d85',
+  accent: '#6b8dff',
+  border: 'rgba(255, 255, 255, 0.12)',
 };
 
 // Theme-relevant body attributes DSH flips when the appearance changes.
@@ -83,18 +87,34 @@ function colorReader(document, dark) {
   };
 }
 
+function mix(foreground, background, weight) {
+  const read = (hex) => [1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
+  const [fr, fg, fb] = read(foreground);
+  const [br, bgColor, bb] = read(background);
+  const channel = (f, b) => Math.round(f * weight + b * (1 - weight)).toString(16).padStart(2, '0');
+  return `#${channel(fr, br)}${channel(fg, bgColor)}${channel(fb, bb)}`;
+}
+
 function themeConfig(document) {
   if (!document.body) throw new Error('Mermaid theme requires a document body');
   const dark = isDark();
   const fallbacks = dark ? DARK_FALLBACKS : LIGHT_FALLBACKS;
   const reader = colorReader(document, dark);
   try {
+    const canvas = reader.color('--dsw-alias-bg-layer-1', fallbacks.canvas);
     const bg = reader.color('--dsw-alias-markdown-code-block', fallbacks.bg);
-    const surface = reader.color('--dsw-alias-bg-layer-2', fallbacks.surface);
     const text = reader.color('--dsw-alias-label-primary', fallbacks.text);
-    const line = reader.color('--dsw-alias-label-tertiary', fallbacks.line);
+    const line = reader.color('--dsw-alias-label-secondary', fallbacks.line);
+    const muted = reader.color('--dsw-alias-label-tertiary', fallbacks.muted);
     const accent = reader.color('--dsw-alias-state-business-primary', fallbacks.accent);
-    const border = reader.color('--dsw-alias-border-l1', fallbacks.border);
+    const border = reader.color('--dsw-alias-border-l2', fallbacks.border);
+    // DSH's code-block surface sits within a few percent of the page background
+    // (#f9fafb on #fff), so painting nodes with it makes them disappear in the
+    // light theme. Tint the accent into the page background instead: readable
+    // in every theme without hard-coding light/dark colors.
+    const nodeFill = mix(accent, canvas, dark ? 0.26 : 0.11);
+    const nodeBorder = mix(accent, canvas, dark ? 0.55 : 0.42);
+    const clusterFill = mix(accent, canvas, dark ? 0.12 : 0.05);
     const fontFamily = document.defaultView.getComputedStyle(document.body).fontFamily || 'sans-serif';
     // Mermaid 11 resolves several diagram families through themeVariables, but
     // sequence diagrams still paint actors from the base theme. Re-assert the
@@ -102,21 +122,21 @@ function themeConfig(document) {
     const sequenceCss = [
       `[aria-roledescription="sequence"] rect.actor,`,
       `[aria-roledescription="sequence"] .actor-man circle,`,
-      `[aria-roledescription="sequence"] .actor-man line { fill: ${surface}; stroke: ${border}; }`,
+      `[aria-roledescription="sequence"] .actor-man line { fill: ${nodeFill}; stroke: ${nodeBorder}; }`,
       `[aria-roledescription="sequence"] text.actor > tspan { fill: ${text}; }`,
-      `[aria-roledescription="sequence"] .actor-line { stroke: ${line}; }`,
+      `[aria-roledescription="sequence"] .actor-line { stroke: ${muted}; }`,
       `[aria-roledescription="sequence"] .messageLine0,`,
       `[aria-roledescription="sequence"] .messageLine1 { stroke: ${line}; }`,
       `[aria-roledescription="sequence"] [id$="-arrowhead"] path { fill: ${line}; stroke: ${line}; }`,
       `[aria-roledescription="sequence"] .messageText { fill: ${text}; }`,
-      `[aria-roledescription="sequence"] .labelBox { fill: ${surface}; stroke: ${border}; }`,
+      `[aria-roledescription="sequence"] .labelBox { fill: ${nodeFill}; stroke: ${nodeBorder}; }`,
       `[aria-roledescription="sequence"] .labelText,`,
       `[aria-roledescription="sequence"] .loopText { fill: ${text}; }`,
       `[aria-roledescription="sequence"] .note { fill: ${bg}; stroke: ${border}; }`,
       `[aria-roledescription="sequence"] .noteText { fill: ${text}; }`,
       `[aria-roledescription="sequence"] .activation0,`,
       `[aria-roledescription="sequence"] .activation1,`,
-      `[aria-roledescription="sequence"] .activation2 { fill: ${surface}; stroke: ${accent}; }`,
+      `[aria-roledescription="sequence"] .activation2 { fill: ${nodeFill}; stroke: ${accent}; }`,
     ].join('\n');
 
     return {
@@ -133,37 +153,43 @@ function themeConfig(document) {
         darkMode: dark,
         fontFamily,
         fontSize: '14px',
-        background: bg,
-        primaryColor: surface,
+        background: 'transparent',
+        primaryColor: nodeFill,
         primaryTextColor: text,
-        primaryBorderColor: border,
-        secondaryColor: bg,
+        primaryBorderColor: nodeBorder,
+        secondaryColor: clusterFill,
         secondaryTextColor: text,
-        secondaryBorderColor: line,
-        tertiaryColor: surface,
+        secondaryBorderColor: nodeBorder,
+        tertiaryColor: bg,
         tertiaryTextColor: text,
-        tertiaryBorderColor: line,
+        tertiaryBorderColor: border,
         lineColor: line,
         textColor: text,
-        mainBkg: surface,
-        nodeBorder: border,
-        clusterBkg: bg,
-        clusterBorder: border,
-        edgeLabelBackground: bg,
-        actorBkg: surface,
-        actorBorder: border,
+        mainBkg: nodeFill,
+        nodeBorder,
+        clusterBkg: clusterFill,
+        clusterBorder: nodeBorder,
+        edgeLabelBackground: canvas,
+        actorBkg: nodeFill,
+        actorBorder: nodeBorder,
         actorTextColor: text,
-        actorLineColor: line,
+        actorLineColor: muted,
         signalColor: line,
         signalTextColor: text,
-        labelBoxBkgColor: surface,
-        labelBoxBorderColor: line,
+        labelBoxBkgColor: nodeFill,
+        labelBoxBorderColor: nodeBorder,
         labelTextColor: text,
         noteBkgColor: bg,
-        noteBorderColor: line,
+        noteBorderColor: border,
         noteTextColor: text,
-        activationBkgColor: surface,
+        activationBkgColor: nodeFill,
         activationBorderColor: accent,
+        stateBkg: nodeFill,
+        stateBorder: nodeBorder,
+        labelBackgroundColor: canvas,
+        compositeBackground: clusterFill,
+        compositeBorder: nodeBorder,
+        compositeTitleBackground: clusterFill,
       },
     };
   } finally {

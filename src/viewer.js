@@ -12,7 +12,7 @@ function createFullscreenViewer({ t }) {
   function setScale(scale, anchor) {
     if (!viewer) return;
     const previousScale = viewer.scale;
-    const nextScale = Math.min(5, Math.max(0.1, scale));
+    const nextScale = Math.min(4, Math.max(0.1, scale));
     if (anchor && previousScale > 0 && nextScale !== previousScale) {
       const ratio = nextScale / previousScale;
       viewer.panX = anchor.x - ((anchor.x - viewer.panX) * ratio);

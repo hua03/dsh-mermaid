@@ -68,6 +68,12 @@ test('banner text decides the language when the code element has no language cla
     assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: 'mermaid', source: 'flowchart TD\nA-->B' })), true);
     assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: 'python', source: 'graph = {"a": 1}' })), false);
     assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: '代码', source: 'flowchart TD\nA-->B' })), true);
+    // DSH's zh-CN UI labels untagged/unknown fences with 「代码块」; that is a
+    // generic label, not a language, so the source heuristic must still run.
+    assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: '代码块', source: 'flowchart TD\nA-->B' })), true);
+    assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: '代码块', source: 'graph = {"a": 1}' })), false);
+    assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: 'Code block', source: 'flowchart TD\nA-->B' })), true);
+    assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: 'Code block', source: 'graph = {"a": 1}' })), false);
     assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: '', source: 'graph LR\nA-->B' })), true);
     assert.equal(isMermaidCodeBlock(block({ language: '', bannerText: 'mermaid', source: '%%{init: {}}%%\nflowchart TD\nA-->B' })), true);
     assert.equal(isMermaidSource('%%{init: {"theme":"forest"}}%%\nflowchart TD\nA-->B'), true);

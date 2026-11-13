@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 — 2026-11-13
+
+修复中文界面下 mermaid 代码块不渲染的问题。
+
+- DSH 中文 UI 对未知/未标注语言的 fence 显示通用标签「代码块」（英文为
+  `Code block`），旧逻辑把它当成真实语言名直接判否，导致中文界面上聊天与
+  文件预览里的 mermaid 块全部不接管。现在「代码块 / 代码片段 / code block /
+  codeblock」等按通用标签处理，继续走源码首词判定。
+- 收紧 `graph` / `flowchart` 的源码启发式：要求首行带方向词（TD/TB/BT/LR/RL）
+  或图里存在箭头，避免把 `graph = build_dag()` 这类普通代码误判为 mermaid。
+- 补充对应单元测试；harness 用「代码块」banner 复测通过（3/3 块接管并出图）。
+
 ## 0.1.0 — 2026-11-13
 
 首个自定义版本，基于 MrmoLabs/dsh-mermaid 0.4.5 的源码结构（MIT）重写定制。

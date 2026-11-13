@@ -68,7 +68,9 @@ const FOREIGN_LANGS = new Set([
 
 // Generic banner labels that carry no language information; fall back to source.
 const GENERIC_LABELS = new Set([
-  'code', 'text', 'txt', 'plain', 'plaintext', 'unknown', '代码', '文本', '纯文本',
+  'code', 'code-block', 'codeblock', 'code-snippet', 'snippet',
+  'text', 'txt', 'plain', 'plaintext', 'plain-text', 'unknown',
+  '代码', '代码块', '代码片段', '文本', '纯文本',
 ]);
 
 function stripPreamble(source) {
@@ -103,8 +105,18 @@ function diagramType(source) {
   return DIAGRAM_TYPES.get(firstToken(source).toLowerCase()) || '';
 }
 
+// `graph` / `flowchart` are the only headers that take a trailing direction on
+// the first line, and both are also common variable names in other languages
+// (`graph = build_dag()`). Require a diagram body before trusting them.
+const FLOW_HEADER_RE = /^(?:flowchart|graph)\b/i;
+const FLOW_DIRECTION_RE = /^(?:flowchart|graph)\s+(?:TD|TB|BT|LR|RL)\b/i;
+const EDGE_RE = /(?:-->|---|==>|-\.->|<-->|--[^-\n]+-->)/;
+
 function isMermaidSource(source) {
-  return diagramType(source) !== '';
+  const type = firstToken(source).toLowerCase();
+  if (!DIAGRAM_TYPES.has(type)) return false;
+  if (!FLOW_HEADER_RE.test(stripPreamble(source))) return true;
+  return FLOW_DIRECTION_RE.test(stripPreamble(source)) || EDGE_RE.test(source);
 }
 
 function bannerLanguage(block) {
@@ -128,6 +140,16 @@ function hasExplicitLanguage(classList) {
   return Array.from(classList || []).some((name) => ANY_LANG_RE.test(name));
 }
 
+// DSH's locale strings for the "no known language" banner come as
+// `Code block` / `代码块` / `代码片段` and may be prefixed by nothing else. Treat a
+// label as generic when it is a known alias or one of them plus a suffix.
+function isGenericLabel(label) {
+  if (!label) return true;
+  if (GENERIC_LABELS.has(label)) return true;
+  const stripped = label.replace(/(?:块|片段|block)$/u, '').trim();
+  return stripped !== label && (GENERIC_LABELS.has(stripped) || stripped === 'code' || stripped === '代码');
+}
+
 // An explicit `language-*` class is authoritative; DSH's banner is a fallback
 // for lazy-highlighted output. Only an empty/generic label allows the source
 // heuristic, so ```` ```arduino ```` can never be mistaken for a diagram.
@@ -140,7 +162,7 @@ function isMermaidCodeBlock(code) {
   const language = bannerLanguage(code.closest('.md-code-block'));
   if (MERMAID_BANNER_LANGS.has(language)) return true;
   // Any non-generic banner label is a real language, so it cannot be Mermaid.
-  if (language && !GENERIC_LABELS.has(language)) return false;
+  if (language && !isGenericLabel(language)) return false;
   return isMermaidSource(code.textContent || '');
 }
 

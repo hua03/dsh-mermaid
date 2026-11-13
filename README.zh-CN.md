@@ -25,8 +25,14 @@
 - **懒加载运行时**：Mermaid 11.17.2 单独打包为 ESM，由 host 半从
   `/dsh-mermaid-custom/mermaid-runtime.js?rev=<hash>` 同源提供，客户端只在第一张
   图接近视口时才 `import()`；没有 CDN、没有外联请求、没有上报。
-- **流式与性能**：MutationObserver 增量发现代码块，500 ms 去抖；IntersectionObserver
-  距视口 400 px 才首次渲染；缓存 32 张 SVG，主题变化时失效。
+- **流式与性能**：MutationObserver 增量发现代码块，流式更新 500 ms 去抖。检测到
+  块后立即渲染（不再等滚动进视口），后续图表用 `requestIdleCallback` 在空闲时段
+  依次渲染，单个文档最多预渲染 10 张，其余仍交给 IntersectionObserver；按
+  「主题 + 源码」缓存 32 张 SVG，主题变化时失效。
+- **iframe 隔离渲染**：正文很长时，mermaid 在正文里插入测量节点会让每次布局刷新
+  重算整篇样式（实测单张图 1.6–2.2 s 长任务）。渲染改在隐藏的同源 iframe 内完成，
+  只把最终 SVG 标记取回插进正文；iframe 在检测到 mermaid 块时预热，失败自动回退
+  页内渲染。
 - **安全**：`securityLevel: 'strict'`、`htmlLabels: false`、SVG 经 DOMParser +
   白名单清洗后再插入；拒绝超过 50,000 字符 / 2,000 行的源码。
 

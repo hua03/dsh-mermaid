@@ -9,6 +9,7 @@ const TAG_ID = 'dsh-mermaid-custom/css';
 const STABLE_MS = 300;
 const RENDER_DEBOUNCE_MS = 500;
 const VIEWPORT_MARGIN_PX = 400;
+const EAGER_RENDER_LIMIT = 10;
 const COPY_FEEDBACK_MS = 1_200;
 const MAX_SOURCE_CHARS = 50_000;
 const MAX_SOURCE_LINES = 2_000;
@@ -94,6 +95,7 @@ let isolatedState = 'idle';
 let isolatedWaiter = null;
 let isolatedReadyTimer = null;
 let isolatedUnavailable = false;
+let eagerRenders = 0;
 const isolatedPending = new Map();
 
 function debugIsolate(state, error) {
@@ -450,7 +452,7 @@ function createEntry(code) {
     code, wrapper, bar, pane, codePane, errorEl, statusEl, badge, btnDiagram, btnCode,
     btnCopy, btnFullscreen, btnDownloadSvg, actionSlot,
     lastRendered: '', stableTimer: null, renderTimer: null, renderGeneration: 0, viewAdjustment: 0,
-    viewportObserver: null, copyTimer: null, hostBlock: null,
+    viewportObserver: null, copyTimer: null, hostBlock: null, eager: false,
     messageKey: 'rendering', messageParameters: {},
     statusKey: null, statusParameters: {}, tooltipPositioner,
   };
@@ -480,17 +482,25 @@ function createEntry(code) {
     }
     pre.parentNode.insertBefore(wrapper, pre);
     entry.hostBlock = claimHostBlock(entry);
-    // Defer Mermaid parsing until the diagram is close to the viewport; the
-    // preview sidebar can hold long documents, so offscreen fences stay cheap.
+    // Render ahead of the scroll position: isolated rendering is cheap enough
+    // that waiting until the diagram reaches the viewport is what the user
+    // perceives as lag. Long documents still degrade gracefully — only the
+    // first EAGER_RENDER_LIMIT diagrams render up front, the rest stay tied to
+    // the viewport observer.
+    if (eagerRenders < EAGER_RENDER_LIMIT) {
+      eagerRenders += 1;
+      entry.eager = true;
+      scheduleRender(entry);
+    }
     if (typeof IntersectionObserver === 'function') {
       entry.viewportObserver = new IntersectionObserver((records) => {
         if (!records.some((record) => record.isIntersecting)) return;
         entry.viewportObserver?.disconnect();
         entry.viewportObserver = null;
-        scheduleRender(entry);
+        if (!entry.eager) scheduleRender(entry);
       }, { rootMargin: `${VIEWPORT_MARGIN_PX}px 0px` });
       entry.viewportObserver.observe(wrapper);
-    } else {
+    } else if (!entry.eager) {
       scheduleRender(entry);
     }
   }, STABLE_MS);
@@ -619,7 +629,12 @@ function scheduleRender(entry) {
 }
 
 function yieldToBrowser() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  // Spread background renders over idle periods so eagerly rendering a long
+  // document does not block scrolling or typing.
+  if (typeof requestIdleCallback === 'function') {
+    return new Promise((resolve) => { requestIdleCallback(() => resolve(), { timeout: 400 }); });
+  }
+  return new Promise((resolve) => setTimeout(resolve, 16));
 }
 
 function enqueueRender(entry) {
@@ -659,6 +674,10 @@ function disposeEntry(entry) {
   if (entry.copyTimer) clearTimeout(entry.copyTimer);
   entry.viewportObserver?.disconnect();
   entry.viewportObserver = null;
+  if (entry.eager) {
+    entry.eager = false;
+    eagerRenders = Math.max(0, eagerRenders - 1);
+  }
   releaseHostBlock(entry);
   entry.renderGeneration += 1;
   if (fullscreenViewer.isOpenFor(entry)) fullscreenViewer.close();

@@ -1,6 +1,6 @@
 {
   "name": "@huahao/dsh-mermaid",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Mermaid diagrams in DeepSeek Harness (chat + file preview), tuned for DSH 0.2.2: native-token theming, lazy runtime, fullscreen/SVG export, no telemetry.",
   "author": {
     "name": "huahao"
